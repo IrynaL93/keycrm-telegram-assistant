@@ -6,6 +6,55 @@ function validWebhook(request, env) {
   return request.headers.get("X-Telegram-Bot-Api-Secret-Token") === env.WEBHOOK_SECRET;
 }
 
+async function telegramApi(env, method, body = {}) {
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+
+  const data = await response.json();
+  if (!response.ok || !data.ok) {
+    throw new Error(data.description || `Telegram API error (${response.status})`);
+  }
+  return data;
+}
+
+async function setupWebhook(request, env) {
+  try {
+    const origin = new URL(request.url).origin;
+    const webhookUrl = `${origin}/webhook`;
+    const body = {
+      url: webhookUrl,
+      allowed_updates: ["message", "callback_query"],
+      drop_pending_updates: true
+    };
+
+    if (env.WEBHOOK_SECRET) {
+      body.secret_token = env.WEBHOOK_SECRET;
+    }
+
+    await telegramApi(env, "setWebhook", body);
+    const info = await telegramApi(env, "getWebhookInfo");
+
+    return Response.json({
+      ok: true,
+      message: "Telegram webhook configured",
+      webhook_url: info.result?.url || webhookUrl,
+      pending_update_count: info.result?.pending_update_count ?? 0,
+      last_error_message: info.result?.last_error_message || null,
+      secret_token_enabled: Boolean(env.WEBHOOK_SECRET)
+    });
+  } catch (error) {
+    console.error("Webhook setup failed", error);
+    return Response.json({ ok: false, error: error.message }, { status: 500 });
+  }
+}
+
 async function handleUpdate(update, env) {
   if (update.message) {
     const chatId = update.message.chat.id;
@@ -42,7 +91,11 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.0.0" });
+      return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.1.0" });
+    }
+
+    if (request.method === "GET" && url.pathname === "/setup") {
+      return setupWebhook(request, env);
     }
 
     if (request.method !== "POST" || url.pathname !== "/webhook") {
