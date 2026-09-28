@@ -65,6 +65,10 @@ async function getPagedDictionary(env, endpoint, label) {
           ? response
           : [];
 
+      if (label === "order statuses") {
+        console.log("KEYCRM FULL ORDER STATUSES PAGE", JSON.stringify({ page, data }));
+      }
+
       items.push(...data);
       if (!response.next_page_url || data.length === 0) break;
       page += 1;
