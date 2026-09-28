@@ -7,5 +7,12 @@
     "TIMEZONE": "Europe/Kyiv",
     "CURRENCY": "UAH",
     "COMPANY_NAME": "KeyCRM"
+  },
+  "previews": {
+    "vars": {
+      "TIMEZONE": "Europe/Kyiv",
+      "CURRENCY": "UAH",
+      "COMPANY_NAME": "KeyCRM"
+    }
   }
 }
