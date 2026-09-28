@@ -29,9 +29,25 @@ function managerName(order) {
 function makeDictionaryMap(items) {
   const map = new Map();
   for (const item of items || []) {
-    if (item?.id === undefined || item?.id === null) continue;
-    const name = item.name || item.title;
-    if (name) map.set(String(item.id), name);
+    const name = item?.name || item?.title;
+    if (!name) continue;
+
+    // KeyCRM can return a numeric ID or a system alias/code in an order.
+    // Index every known dictionary identifier so reports always show the
+    // client's current display name instead of the technical alias.
+    const keys = [
+      item.id,
+      item.alias,
+      item.code,
+      item.key,
+      item.slug
+    ];
+
+    for (const key of keys) {
+      if (key !== undefined && key !== null && String(key).trim() !== "") {
+        map.set(String(key), name);
+      }
+    }
   }
   return map;
 }
@@ -40,17 +56,45 @@ function sourceName(order, sourceMap) {
   if (order.source?.name) return order.source.name;
   if (order.source?.title) return order.source.title;
   if (order.source_name) return order.source_name;
-  if (order.source_id !== undefined && order.source_id !== null) {
-    return sourceMap.get(String(order.source_id)) || `Джерело #${order.source_id}`;
+
+  const sourceKey = order.source_id ?? order.source_uuid ?? order.source_alias;
+  if (sourceKey !== undefined && sourceKey !== null) {
+    return sourceMap.get(String(sourceKey)) || `Джерело #${sourceKey}`;
   }
   return "Не вказано";
 }
 
 function statusName(order, statusMap) {
-  if (order.status?.name) return order.status.name;
+  // Prefer the dictionary lookup first: embedded status values can contain
+  // KeyCRM's technical/system name rather than the client's custom label.
+  const candidates = [
+    order.status_id,
+    order.status_uuid,
+    order.status_alias,
+    order.status?.id,
+    order.status?.alias,
+    order.status?.code,
+    order.status?.key,
+    order.status?.slug,
+    typeof order.status === "string" ? order.status : null
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    const resolved = statusMap.get(String(candidate));
+    if (resolved) return resolved;
+  }
+
+  // If KeyCRM already embeds a human-readable status name, use it.
+  if (order.status?.name) {
+    return statusMap.get(String(order.status.name)) || order.status.name;
+  }
   if (order.status?.title) return order.status.title;
-  if (order.status_id !== undefined && order.status_id !== null) {
-    return statusMap.get(String(order.status_id)) || `Status #${order.status_id}`;
+
+  // Last-resort fallback keeps the report usable even for an unknown schema.
+  const raw = order.status_id ?? order.status_alias ?? order.status;
+  if (raw !== undefined && raw !== null && typeof raw !== "object") {
+    return statusMap.get(String(raw)) || String(raw);
   }
   return "Без статусу";
 }
