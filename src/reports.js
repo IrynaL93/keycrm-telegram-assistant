@@ -1,4 +1,4 @@
-import { getAllOrders } from "./keycrm.js";
+import { getAllOrders, getOrderStatuses } from "./keycrm.js";
 import { periodDates } from "./periods.js";
 
 const money = (value, currency = "UAH") => {
@@ -33,17 +33,40 @@ function sourceName(order) {
   return "Не вказано";
 }
 
+function makeStatusMap(statuses) {
+  const map = new Map();
+  for (const status of statuses) {
+    if (status?.id === undefined || status?.id === null) continue;
+    const name = status.name || status.title;
+    if (name) map.set(String(status.id), name);
+  }
+  return map;
+}
+
+function statusName(order, statusMap) {
+  if (order.status?.name) return order.status.name;
+  if (order.status?.title) return order.status.title;
+
+  if (order.status_id !== undefined && order.status_id !== null) {
+    return statusMap.get(String(order.status_id)) || `Status #${order.status_id}`;
+  }
+
+  return "Без статусу";
+}
+
 export async function buildOrdersReport(env, period = "yesterday") {
   const range = periodDates(period, env.TIMEZONE || "Europe/Kyiv");
 
-  // KeyCRM returns only the base order entity unless associations are requested.
-  // Request source and manager data when the API exposes them for the account.
-  const orders = await getAllOrders(env, {
-    ordered_at_from: range.utcFrom,
-    ordered_at_to: range.utcTo,
-    include: "source,manager"
-  });
+  const [orders, statusesList] = await Promise.all([
+    getAllOrders(env, {
+      ordered_at_from: range.utcFrom,
+      ordered_at_to: range.utcTo,
+      include: "source,manager"
+    }),
+    getOrderStatuses(env)
+  ]);
 
+  const statusMap = makeStatusMap(statusesList);
   const total = orders.reduce((sum, order) => sum + Number(order.grand_total || 0), 0);
   const average = orders.length ? total / orders.length : 0;
 
@@ -52,7 +75,7 @@ export async function buildOrdersReport(env, period = "yesterday") {
   const managerCounts = new Map();
 
   for (const order of orders) {
-    addCount(statusCounts, order.status?.name || (order.status_id ? `Status #${order.status_id}` : "Без статусу"));
+    addCount(statusCounts, statusName(order, statusMap));
     addCount(sourceCounts, sourceName(order));
     addCount(managerCounts, managerName(order));
   }
