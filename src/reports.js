@@ -57,11 +57,13 @@ function statusName(order, statusMap) {
 export async function buildOrdersReport(env, period = "yesterday") {
   const range = periodDates(period, env.TIMEZONE || "Europe/Kyiv");
 
+  // KeyCRM Orders API does not support include=source.
+  // Status names are loaded separately so reports work with each client's custom statuses.
   const [orders, statusesList] = await Promise.all([
     getAllOrders(env, {
       ordered_at_from: range.utcFrom,
       ordered_at_to: range.utcTo,
-      include: "source,manager"
+      include: "manager"
     }),
     getOrderStatuses(env)
   ]);
