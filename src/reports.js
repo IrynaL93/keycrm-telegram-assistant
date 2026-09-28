@@ -26,10 +26,14 @@ function managerName(order) {
   return "Не призначено";
 }
 
+function dictionaryDisplayName(item) {
+  return item?.name || item?.title || item?.label || item?.display_name || null;
+}
+
 function makeDictionaryMap(items) {
   const map = new Map();
   for (const item of items || []) {
-    const name = item?.name || item?.title;
+    const name = dictionaryDisplayName(item);
     if (!name) continue;
 
     const keys = [item.id, item.alias, item.code, item.key, item.slug];
@@ -43,15 +47,19 @@ function makeDictionaryMap(items) {
 }
 
 function sourceName(order, sourceMap) {
+  const sourceKey = order.source_id ?? order.source_uuid ?? order.source_alias;
+  if (sourceKey !== undefined && sourceKey !== null) {
+    const resolved = sourceMap.get(String(sourceKey));
+    if (resolved) return resolved;
+  }
+
   if (order.source?.name) return order.source.name;
   if (order.source?.title) return order.source.title;
   if (order.source_name) return order.source_name;
 
-  const sourceKey = order.source_id ?? order.source_uuid ?? order.source_alias;
-  if (sourceKey !== undefined && sourceKey !== null) {
-    return sourceMap.get(String(sourceKey)) || `Джерело #${sourceKey}`;
-  }
-  return "Не вказано";
+  return sourceKey !== undefined && sourceKey !== null
+    ? `Джерело #${sourceKey}`
+    : "Не вказано";
 }
 
 function statusName(order, statusMap) {
@@ -78,7 +86,7 @@ function statusName(order, statusMap) {
 
   const raw = order.status_id ?? order.status_alias ?? order.status;
   if (raw !== undefined && raw !== null && typeof raw !== "object") {
-    return statusMap.get(String(raw)) || String(raw);
+    return String(raw);
   }
   return "Без статусу";
 }
