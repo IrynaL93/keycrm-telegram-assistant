@@ -1,4 +1,4 @@
-import { getAllOrders, getOrderStatuses } from "./keycrm.js";
+import { getAllOrders, getOrderStatuses, getOrderSources } from "./keycrm.js";
 import { periodDates } from "./periods.js";
 
 const money = (value, currency = "UAH") => {
@@ -26,37 +26,37 @@ function managerName(order) {
   return "Не призначено";
 }
 
-function sourceName(order) {
-  if (order.source?.name) return order.source.name;
-  if (order.source_name) return order.source_name;
-  if (order.source_id) return `Джерело #${order.source_id}`;
-  return "Не вказано";
-}
-
-function makeStatusMap(statuses) {
+function makeDictionaryMap(items) {
   const map = new Map();
-  for (const status of statuses) {
-    if (status?.id === undefined || status?.id === null) continue;
-    const name = status.name || status.title;
-    if (name) map.set(String(status.id), name);
+  for (const item of items || []) {
+    if (item?.id === undefined || item?.id === null) continue;
+    const name = item.name || item.title;
+    if (name) map.set(String(item.id), name);
   }
   return map;
+}
+
+function sourceName(order, sourceMap) {
+  if (order.source?.name) return order.source.name;
+  if (order.source?.title) return order.source.title;
+  if (order.source_name) return order.source_name;
+  if (order.source_id !== undefined && order.source_id !== null) {
+    return sourceMap.get(String(order.source_id)) || `Джерело #${order.source_id}`;
+  }
+  return "Не вказано";
 }
 
 function statusName(order, statusMap) {
   if (order.status?.name) return order.status.name;
   if (order.status?.title) return order.status.title;
-
   if (order.status_id !== undefined && order.status_id !== null) {
     return statusMap.get(String(order.status_id)) || `Status #${order.status_id}`;
   }
-
   return "Без статусу";
 }
 
 function parseKeycrmDate(value) {
   if (!value) return null;
-  // KeyCRM uses UTC. A timestamp without an explicit zone must therefore be treated as UTC.
   const normalized = String(value).trim().replace(" ", "T");
   const withZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`;
   const date = new Date(withZone);
@@ -64,7 +64,6 @@ function parseKeycrmDate(value) {
 }
 
 function orderReportDate(order) {
-  // ordered_at is the business order date. Fall back to created_at for imported/manual orders.
   return parseKeycrmDate(order.ordered_at || order.created_at);
 }
 
@@ -82,13 +81,10 @@ function filterOrdersByRange(orders, range) {
 export async function buildOrdersReport(env, period = "yesterday") {
   const range = periodDates(period, env.TIMEZONE || "Europe/Kyiv");
 
-  // KeyCRM filters must use filter[...] query parameters. Previously ordered_at_from/
-  // ordered_at_to were sent as top-level params, so KeyCRM ignored them and returned
-  // the same orders for every period. Fetch orders and enforce the selected UTC range
-  // locally as a safety net so Telegram reports cannot mix dates.
-  const [allOrders, statusesList] = await Promise.all([
+  const [allOrders, statusesList, sourcesList] = await Promise.all([
     getAllOrders(env, { include: "manager" }),
-    getOrderStatuses(env)
+    getOrderStatuses(env),
+    getOrderSources(env)
   ]);
 
   const orders = filterOrdersByRange(allOrders, range);
@@ -97,10 +93,13 @@ export async function buildOrdersReport(env, period = "yesterday") {
     utcFrom: range.utcFrom,
     utcTo: range.utcTo,
     fetched: allOrders.length,
-    matched: orders.length
+    matched: orders.length,
+    statusesLoaded: statusesList.length,
+    sourcesLoaded: sourcesList.length
   }));
 
-  const statusMap = makeStatusMap(statusesList);
+  const statusMap = makeDictionaryMap(statusesList);
+  const sourceMap = makeDictionaryMap(sourcesList);
   const total = orders.reduce((sum, order) => sum + Number(order.grand_total || 0), 0);
   const average = orders.length ? total / orders.length : 0;
 
@@ -110,7 +109,7 @@ export async function buildOrdersReport(env, period = "yesterday") {
 
   for (const order of orders) {
     addCount(statusCounts, statusName(order, statusMap));
-    addCount(sourceCounts, sourceName(order));
+    addCount(sourceCounts, sourceName(order, sourceMap));
     addCount(managerCounts, managerName(order));
   }
 
