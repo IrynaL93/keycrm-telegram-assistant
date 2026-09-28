@@ -73,9 +73,7 @@ function statusName(order, statusMap) {
     if (resolved) return resolved;
   }
 
-  if (order.status?.name) {
-    return statusMap.get(String(order.status.name)) || order.status.name;
-  }
+  if (order.status?.name) return order.status.name;
   if (order.status?.title) return order.status.title;
 
   const raw = order.status_id ?? order.status_alias ?? order.status;
@@ -118,18 +116,6 @@ export async function buildOrdersReport(env, period = "yesterday") {
   ]);
 
   const orders = filterOrdersByRange(allOrders, range);
-
-  // TEMP diagnostics: needed to learn the exact KeyCRM status dictionary schema.
-  console.log("KEYCRM STATUS DICTIONARY", JSON.stringify(statusesList));
-  console.log("KEYCRM ORDER STATUS SAMPLES", JSON.stringify(
-    orders.slice(0, 10).map((order) => ({
-      id: order.id,
-      status_id: order.status_id,
-      status_uuid: order.status_uuid,
-      status_alias: order.status_alias,
-      status: order.status
-    }))
-  ));
 
   console.log("Report date filter", JSON.stringify({
     period,
