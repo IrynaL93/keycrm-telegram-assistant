@@ -34,9 +34,7 @@ async function setupWebhook(request, env) {
       drop_pending_updates: true
     };
 
-    if (env.WEBHOOK_SECRET) {
-      body.secret_token = env.WEBHOOK_SECRET;
-    }
+    if (env.WEBHOOK_SECRET) body.secret_token = env.WEBHOOK_SECRET;
 
     await telegramApi(env, "setWebhook", body);
     const info = await telegramApi(env, "getWebhookInfo");
@@ -56,17 +54,30 @@ async function setupWebhook(request, env) {
 }
 
 async function handleUpdate(update, env) {
+  console.log("TG update", JSON.stringify({
+    update_id: update.update_id,
+    has_message: Boolean(update.message),
+    has_callback_query: Boolean(update.callback_query),
+    callback_data: update.callback_query?.data || null
+  }));
+
   if (update.message) {
     const chatId = update.message.chat.id;
     const text = update.message.text || "";
+    console.log("TG message", JSON.stringify({ chatId, text }));
 
     if (text === "/start") {
       return sendMessage(env, chatId, `👋 <b>${env.COMPANY_NAME || "KeyCRM"} Telegram Assistant</b>\n\nОберіть звіт:`, mainKeyboard());
     }
 
     if (text === "/getreport" || text === "/report") {
-      const report = await buildOrdersReport(env, "yesterday");
-      return sendMessage(env, chatId, report, mainKeyboard());
+      try {
+        const report = await buildOrdersReport(env, "yesterday");
+        return sendMessage(env, chatId, report, mainKeyboard());
+      } catch (error) {
+        console.error("Report command failed", error);
+        return sendMessage(env, chatId, `⚠️ Помилка формування звіту: ${error.message}`, mainKeyboard());
+      }
     }
 
     return sendMessage(env, chatId, "Натисніть /start, щоб відкрити меню.", mainKeyboard());
@@ -74,16 +85,45 @@ async function handleUpdate(update, env) {
 
   if (update.callback_query) {
     const callback = update.callback_query;
-    await answerCallback(env, callback.id);
-    const chatId = callback.message.chat.id;
+    const chatId = callback.message?.chat?.id;
     const data = callback.data || "";
+
+    console.log("TG callback received", JSON.stringify({
+      callback_id: callback.id,
+      chatId,
+      data
+    }));
+
+    try {
+      await answerCallback(env, callback.id);
+    } catch (error) {
+      console.error("answerCallback failed", error);
+    }
+
+    if (!chatId) {
+      console.error("Callback has no chat id");
+      return;
+    }
 
     if (data.startsWith("orders_")) {
       const period = data.slice("orders_".length);
-      const report = await buildOrdersReport(env, period);
-      return sendMessage(env, chatId, report, mainKeyboard());
+      console.log("Building report", JSON.stringify({ chatId, period }));
+
+      try {
+        const report = await buildOrdersReport(env, period);
+        console.log("Report built", JSON.stringify({ period, length: report?.length || 0 }));
+        return sendMessage(env, chatId, report, mainKeyboard());
+      } catch (error) {
+        console.error("Callback report failed", error);
+        return sendMessage(env, chatId, `⚠️ Помилка формування звіту (${period}): ${error.message}`, mainKeyboard());
+      }
     }
+
+    console.warn("Unknown callback data", data);
+    return sendMessage(env, chatId, `⚠️ Невідома команда кнопки: ${data}`, mainKeyboard());
   }
+
+  console.warn("Unsupported Telegram update", JSON.stringify(update));
 }
 
 export default {
@@ -91,7 +131,7 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.1.0" });
+      return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.2.0" });
     }
 
     if (request.method === "GET" && url.pathname === "/setup") {
@@ -103,15 +143,20 @@ export default {
     }
 
     if (!validWebhook(request, env)) {
+      console.error("Webhook rejected: invalid secret");
       return new Response("Unauthorized", { status: 401 });
     }
 
     try {
       const update = await request.json();
-      ctx.waitUntil(handleUpdate(update, env).catch(console.error));
+      ctx.waitUntil(
+        handleUpdate(update, env).catch((error) => {
+          console.error("handleUpdate failed", error);
+        })
+      );
       return new Response("OK");
     } catch (error) {
-      console.error(error);
+      console.error("Webhook JSON parsing failed", error);
       return new Response("Bad request", { status: 400 });
     }
   }
