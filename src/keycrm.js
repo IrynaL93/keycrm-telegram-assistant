@@ -59,6 +59,13 @@ async function getPagedDictionary(env, endpoint, label) {
   try {
     while (page <= 100) {
       const response = await keycrmGet(env, endpoint, { page, limit: 50 });
+
+      // Temporary diagnostics: show the real KeyCRM dictionary response shape
+      // in Cloudflare Observability without exposing the API token.
+      if (page === 1) {
+        console.log(`KeyCRM ${label} raw response`, JSON.stringify(response));
+      }
+
       const data = Array.isArray(response.data)
         ? response.data
         : Array.isArray(response)
@@ -73,6 +80,7 @@ async function getPagedDictionary(env, endpoint, label) {
     console.error(`Unable to load KeyCRM ${label}:`, error);
   }
 
+  console.log(`KeyCRM ${label} parsed`, JSON.stringify({ count: items.length, sample: items.slice(0, 5) }));
   return items;
 }
 
