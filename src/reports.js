@@ -32,17 +32,7 @@ function makeDictionaryMap(items) {
     const name = item?.name || item?.title;
     if (!name) continue;
 
-    // KeyCRM can return a numeric ID or a system alias/code in an order.
-    // Index every known dictionary identifier so reports always show the
-    // client's current display name instead of the technical alias.
-    const keys = [
-      item.id,
-      item.alias,
-      item.code,
-      item.key,
-      item.slug
-    ];
-
+    const keys = [item.id, item.alias, item.code, item.key, item.slug];
     for (const key of keys) {
       if (key !== undefined && key !== null && String(key).trim() !== "") {
         map.set(String(key), name);
@@ -65,8 +55,6 @@ function sourceName(order, sourceMap) {
 }
 
 function statusName(order, statusMap) {
-  // Prefer the dictionary lookup first: embedded status values can contain
-  // KeyCRM's technical/system name rather than the client's custom label.
   const candidates = [
     order.status_id,
     order.status_uuid,
@@ -85,13 +73,11 @@ function statusName(order, statusMap) {
     if (resolved) return resolved;
   }
 
-  // If KeyCRM already embeds a human-readable status name, use it.
   if (order.status?.name) {
     return statusMap.get(String(order.status.name)) || order.status.name;
   }
   if (order.status?.title) return order.status.title;
 
-  // Last-resort fallback keeps the report usable even for an unknown schema.
   const raw = order.status_id ?? order.status_alias ?? order.status;
   if (raw !== undefined && raw !== null && typeof raw !== "object") {
     return statusMap.get(String(raw)) || String(raw);
@@ -132,6 +118,19 @@ export async function buildOrdersReport(env, period = "yesterday") {
   ]);
 
   const orders = filterOrdersByRange(allOrders, range);
+
+  // TEMP diagnostics: needed to learn the exact KeyCRM status dictionary schema.
+  console.log("KEYCRM STATUS DICTIONARY", JSON.stringify(statusesList));
+  console.log("KEYCRM ORDER STATUS SAMPLES", JSON.stringify(
+    orders.slice(0, 10).map((order) => ({
+      id: order.id,
+      status_id: order.status_id,
+      status_uuid: order.status_uuid,
+      status_alias: order.status_alias,
+      status: order.status
+    }))
+  ));
+
   console.log("Report date filter", JSON.stringify({
     period,
     utcFrom: range.utcFrom,
