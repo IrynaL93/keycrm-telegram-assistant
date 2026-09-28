@@ -10,8 +10,8 @@ export async function buildOrdersReport(env, period = "yesterday") {
   const range = periodDates(period, env.TIMEZONE || "Europe/Kyiv");
 
   const orders = await getAllOrders(env, {
-    ordered_at_from: `${range.from} 00:00:00`,
-    ordered_at_to: `${range.to} 23:59:59`
+    ordered_at_from: range.utcFrom,
+    ordered_at_to: range.utcTo
   });
 
   const total = orders.reduce((sum, order) => sum + Number(order.grand_total || 0), 0);
