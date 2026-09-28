@@ -52,31 +52,34 @@ export async function getAllOrders(env, params = {}) {
   return orders;
 }
 
-export async function getOrderStatuses(env) {
-  const statuses = [];
+async function getPagedDictionary(env, endpoint, label) {
+  const items = [];
   let page = 1;
 
   try {
     while (page <= 100) {
-      const response = await keycrmGet(env, "/order/status", {
-        page,
-        limit: 50
-      });
-
+      const response = await keycrmGet(env, endpoint, { page, limit: 50 });
       const data = Array.isArray(response.data)
         ? response.data
         : Array.isArray(response)
           ? response
           : [];
 
-      statuses.push(...data);
-
+      items.push(...data);
       if (!response.next_page_url || data.length === 0) break;
       page += 1;
     }
   } catch (error) {
-    console.error("Unable to load KeyCRM order statuses:", error);
+    console.error(`Unable to load KeyCRM ${label}:`, error);
   }
 
-  return statuses;
+  return items;
+}
+
+export async function getOrderStatuses(env) {
+  return getPagedDictionary(env, "/order/status", "order statuses");
+}
+
+export async function getOrderSources(env) {
+  return getPagedDictionary(env, "/order/source", "order sources");
 }
