@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local development. Never commit real credentials.
+TELEGRAM_BOT_TOKEN=replace_me
+KEYCRM_API_TOKEN=replace_me
+WEBHOOK_SECRET=replace_with_random_secret
