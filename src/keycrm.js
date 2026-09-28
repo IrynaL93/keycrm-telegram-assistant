@@ -1,5 +1,13 @@
 const API_BASE = "https://openapi.keycrm.app/v1";
 
+function getKeycrmToken(env) {
+  const token = env.KEYCRM_TOKEN || env.KEYCRM_API_TOKEN;
+  if (!token) {
+    throw new Error("KeyCRM token is not configured. Add KEYCRM_TOKEN in Cloudflare Worker secrets.");
+  }
+  return token;
+}
+
 export async function keycrmGet(env, endpoint, params = {}) {
   const url = new URL(API_BASE + endpoint);
   for (const [key, value] of Object.entries(params)) {
@@ -10,7 +18,7 @@ export async function keycrmGet(env, endpoint, params = {}) {
 
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${env.KEYCRM_API_TOKEN}`,
+      Authorization: `Bearer ${getKeycrmToken(env)}`,
       Accept: "application/json"
     }
   });
