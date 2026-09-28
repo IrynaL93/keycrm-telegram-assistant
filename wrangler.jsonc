@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "keycrm-telegram-assistant",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "vars": {
+    "TIMEZONE": "Europe/Kyiv",
+    "CURRENCY": "UAH",
+    "COMPANY_NAME": "KeyCRM"
+  }
+}
