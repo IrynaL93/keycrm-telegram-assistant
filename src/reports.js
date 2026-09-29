@@ -25,45 +25,34 @@ function statusName(o,m){return displayStatusName(rawStatus(o,m));}
 function parseKeycrmDate(v){if(!v)return null;const n=String(v).trim().replace(" ","T"),z=/(?:Z|[+-]\d{2}:?\d{2})$/i.test(n)?n:`${n}Z`,d=new Date(z);return Number.isNaN(d.getTime())?null:d;}
 function filterOrdersByRange(os,r){const f=parseKeycrmDate(r.utcFrom),t=parseKeycrmDate(r.utcTo);if(!f||!t)return os;return os.filter(o=>{const d=parseKeycrmDate(o.ordered_at||o.created_at);return d&&d>=f&&d<=t;});}
 
-// KeyCRM returns payment records in the payments include. A payment counts only when
-// the record itself is marked as paid/confirmed. Never fall back to grand_total or
-// assume every payment record is successful: that caused unpaid orders to appear paid.
 function paymentAmount(p){for(const v of [p?.amount,p?.value,p?.sum,p?.total]){const n=Number(v);if(Number.isFinite(n))return n;}return 0;}
-function paymentIsSuccessful(p){
-  if(!p)return false;
-  if(p.paid===true||p.is_paid===true||p.status===true)return true;
-  const s=String(p.status??p.payment_status??"").trim().toLowerCase();
-  return ["paid","success","successful","completed","complete","confirmed","approved"].includes(s);
-}
-function paidAmount(o){
-  const ps=Array.isArray(o.payments)?o.payments:[];
-  if(ps.length)return ps.filter(paymentIsSuccessful).reduce((s,p)=>s+paymentAmount(p),0);
-  for(const v of [o.paid_amount,o.payment_amount]){if(v!==undefined&&v!==null&&v!==""){const n=Number(v);if(Number.isFinite(n))return n;}}
-  return 0;
-}
+function paymentIsSuccessful(p){if(!p)return false;if(p.paid===true||p.is_paid===true||p.status===true)return true;const s=String(p.status??p.payment_status??"").trim().toLowerCase();return ["paid","success","successful","completed","complete","confirmed","approved"].includes(s);}
+function paidAmount(o){const ps=Array.isArray(o.payments)?o.payments:[];if(ps.length)return ps.filter(paymentIsSuccessful).reduce((s,p)=>s+paymentAmount(p),0);for(const v of [o.paid_amount,o.payment_amount]){if(v!==undefined&&v!==null&&v!==""){const n=Number(v);if(Number.isFinite(n))return n;}}return 0;}
+
+function normalizedStatus(r){return String(r||"").trim().toLowerCase();}
 function isCancelledStatus(r){return /cancel|canceled|cancelled|скас|відмов|incorrect_data|underbid|not_available|bought_elsewhere|did_not_arrange/i.test(r||"");}
-function isDeliveredStatus(r){return /(^|_)(delivered|completed|received|done)(_|$)|отрим|викон/i.test(r||"");}
-function isDeliveryStatus(r){return /delivery|delivered_to_delivery|departing|in_transit|shipping|достав|відправ|дороз/i.test(r||"")&&!isDeliveredStatus(r);}
+function isDeliveredStatus(r){
+  const s=normalizedStatus(r);
+  // delivered_to_delivery means "Передано в доставку", not delivered/completed.
+  if(s==="delivered_to_delivery"||/передано\s+(в|у)\s+достав/i.test(s))return false;
+  return ["delivered","completed","received","done"].includes(s)||/отримано|отриманий|виконано|виконаний/i.test(s);
+}
+function isDeliveryStatus(r){
+  const s=normalizedStatus(r);
+  if(isDeliveredStatus(s))return false;
+  return ["delivered_to_delivery","departing","in_transit","shipping"].includes(s)||/передано\s+(в|у)\s+достав|доставц|відправ|дороз/i.test(s);
+}
 
 export async function buildOrdersReport(env,period="yesterday"){
   const range=periodDates(period,env.TIMEZONE||"Europe/Kyiv");
   const [allOrders,statusesList,sourcesList]=await Promise.all([getAllOrders(env,{include:"manager,payments"}),getOrderStatuses(env),getOrderSources(env)]);
   const orders=filterOrdersByRange(allOrders,range),statusMap=makeDictionaryMap(statusesList),sourceMap=makeDictionaryMap(sourcesList);
   const total=orders.reduce((s,o)=>s+Number(o.grand_total||0),0),average=orders.length?total/orders.length:0,paid=orders.reduce((s,o)=>s+paidAmount(o),0);
-  const fullyPaid=orders.filter(o=>Number(o.grand_total||0)>0&&paidAmount(o)>=Number(o.grand_total||0)-0.01);
-  const partialPaid=orders.filter(o=>paidAmount(o)>0&&paidAmount(o)<Number(o.grand_total||0)-0.01);
+  const fullyPaid=orders.filter(o=>Number(o.grand_total||0)>0&&paidAmount(o)>=Number(o.grand_total||0)-0.01),partialPaid=orders.filter(o=>paidAmount(o)>0&&paidAmount(o)<Number(o.grand_total||0)-0.01);
   const cancelled=orders.filter(o=>isCancelledStatus(rawStatus(o,statusMap))),delivered=orders.filter(o=>isDeliveredStatus(rawStatus(o,statusMap))),inDelivery=orders.filter(o=>isDeliveryStatus(rawStatus(o,statusMap)));
   const sumOrders=a=>a.reduce((s,o)=>s+Number(o.grand_total||0),0),statusCounts=new Map(),sourceCounts=new Map(),managerCounts=new Map();
   for(const o of orders){addCount(statusCounts,statusName(o,statusMap));addCount(sourceCounts,sourceName(o,sourceMap));addCount(managerCounts,managerName(o));}
   const statuses=formatCounts(statusCounts),sources=formatCounts(sourceCounts),managers=formatCounts(managerCounts);
   console.log("Report metrics",JSON.stringify({period,orders:orders.length,total,paid,fullyPaid:fullyPaid.length,partialPaid:partialPaid.length,delivered:delivered.length,inDelivery:inDelivery.length,cancelled:cancelled.length,paymentSamples:orders.slice(0,3).map(o=>({id:o.id,payments:o.payments}))}));
-  return [
-    `📊 <b>Звіт за ${range.label}</b>`,`<code>${range.from}${range.from!==range.to?` — ${range.to}`:""}</code>`,"",
-    `📦 Замовлень: <b>${orders.length}</b>`,`💰 Дохід: <b>${money(total,env.CURRENCY||"UAH")}</b>`,`💳 Оплачено: <b>${money(paid,env.CURRENCY||"UAH")}</b>`,
-    `✅ Повністю оплачені: <b>${fullyPaid.length}</b>`,partialPaid.length?`🟡 Частково оплачені: <b>${partialPaid.length}</b>`:"",
-    `📥 Отримано / виконано: <b>${delivered.length}</b> · ${money(sumOrders(delivered),env.CURRENCY||"UAH")}`,
-    `🚚 В доставці: <b>${inDelivery.length}</b> · ${money(sumOrders(inDelivery),env.CURRENCY||"UAH")}`,
-    `❌ Скасовано / відмови: <b>${cancelled.length}</b> · ${money(sumOrders(cancelled),env.CURRENCY||"UAH")}`,
-    `🧾 Середній чек: <b>${money(average,env.CURRENCY||"UAH")}</b>`,statuses?`\n<b>Статуси</b>\n${statuses}`:"",sources?`\n<b>Джерела</b>\n${sources}`:"",managers?`\n<b>Менеджери</b>\n${managers}`:""
-  ].filter(Boolean).join("\n");
+  return [`📊 <b>Звіт за ${range.label}</b>`,`<code>${range.from}${range.from!==range.to?` — ${range.to}`:""}</code>`,"",`📦 Замовлень: <b>${orders.length}</b>`,`💰 Дохід: <b>${money(total,env.CURRENCY||"UAH")}</b>`,`💳 Оплачено: <b>${money(paid,env.CURRENCY||"UAH")}</b>`,`✅ Повністю оплачені: <b>${fullyPaid.length}</b>`,partialPaid.length?`🟡 Частково оплачені: <b>${partialPaid.length}</b>`:"",`📥 Отримано / виконано: <b>${delivered.length}</b> · ${money(sumOrders(delivered),env.CURRENCY||"UAH")}`,`🚚 В доставці: <b>${inDelivery.length}</b> · ${money(sumOrders(inDelivery),env.CURRENCY||"UAH")}`,`❌ Скасовано / відмови: <b>${cancelled.length}</b> · ${money(sumOrders(cancelled),env.CURRENCY||"UAH")}`,`🧾 Середній чек: <b>${money(average,env.CURRENCY||"UAH")}</b>`,statuses?`\n<b>Статуси</b>\n${statuses}`:"",sources?`\n<b>Джерела</b>\n${sources}`:"",managers?`\n<b>Менеджери</b>\n${managers}`:""].filter(Boolean).join("\n");
 }
