@@ -77,7 +77,7 @@ async function handleUpdate(update, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.3.0", d1: Boolean(env.DB) });
+    if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.4.0", d1: Boolean(env.DB) });
     if (request.method === "GET" && url.pathname === "/setup") return setupWebhook(request, env);
     if (request.method !== "POST" || url.pathname !== "/webhook") return new Response("Not found", { status: 404 });
     if (!validWebhook(request, env)) return new Response("Unauthorized", { status: 401 });
@@ -89,5 +89,13 @@ export default {
       console.error("Webhook JSON parsing failed", error);
       return new Response("Bad request", { status: 400 });
     }
+  },
+
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(
+      syncOrderState(env)
+        .then(result => console.log("Scheduled order-state sync", JSON.stringify({ cron: controller.cron, ...result })))
+        .catch(error => console.error("Scheduled order-state sync failed", error))
+    );
   }
 };
