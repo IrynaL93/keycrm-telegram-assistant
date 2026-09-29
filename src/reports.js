@@ -32,7 +32,6 @@ function normalizedStatus(r){return String(r||"").trim().toLowerCase();}
 function isCancelledStatus(r){return /cancel|canceled|cancelled|скас|відмов|incorrect_data|underbid|not_available|bought_elsewhere|did_not_arrange/i.test(r||"");}
 function isDeliveredStatus(r){
   const s=normalizedStatus(r);
-  // KeyCRM "delivered" / "Доставляється" means the parcel is still in transit.
   if(["delivered","delivered_to_delivery","departing","in_transit","shipping","delivering"].includes(s)||/передано\s+(в|у)\s+достав|доставля|доставц|відправ|дороз/i.test(s))return false;
   return ["completed","received","done"].includes(s)||/отримано|отриманий|виконано|виконаний/i.test(s);
 }
@@ -51,10 +50,17 @@ async function statusEventsInRange(env,range){
     ORDER BY e.event_at ASC`).bind(from.toISOString(),to.toISOString()).all();
   return result.results||[];
 }
-function eventMetric(events,predicate){
+
+// One order may change status several times during the same period.
+// For the status breakdown we use only its LAST status transition in that period,
+// so the same order cannot simultaneously appear as completed, in delivery and cancelled.
+function latestStatusEvents(events){
   const latest=new Map();
-  for(const e of events){if(predicate(e.new_value))latest.set(Number(e.order_id),e);}
-  const rows=[...latest.values()];
+  for(const e of events)latest.set(Number(e.order_id),e);
+  return [...latest.values()];
+}
+function eventMetric(events,predicate){
+  const rows=events.filter(e=>predicate(e.new_value));
   return {count:rows.length,sum:rows.reduce((s,e)=>s+Number(e.grand_total||0),0)};
 }
 
@@ -66,10 +72,11 @@ export async function buildOrdersReport(env,period="yesterday"){
   const paid=allOrders.reduce((s,o)=>s+paidInRange(o,range),0);
   const fullyPaid=allOrders.filter(o=>becameFullyPaidInRange(o,range));
   const partialPaidOrders=allOrders.filter(o=>paidInRange(o,range)>0&&!becameFullyPaidInRange(o,range));
-  const delivered=eventMetric(events,isDeliveredStatus),inDelivery=eventMetric(events,isDeliveryStatus),cancelled=eventMetric(events,isCancelledStatus);
+  const finalStatusEvents=latestStatusEvents(events);
+  const delivered=eventMetric(finalStatusEvents,isDeliveredStatus),inDelivery=eventMetric(finalStatusEvents,isDeliveryStatus),cancelled=eventMetric(finalStatusEvents,isCancelledStatus);
   const sourceCounts=new Map(),managerCounts=new Map();
   for(const o of orders){addCount(sourceCounts,sourceName(o,sourceMap));addCount(managerCounts,managerName(o));}
   const sources=formatCounts(sourceCounts),managers=formatCounts(managerCounts);
-  console.log("Report metrics",JSON.stringify({period,orders:orders.length,total,paid,fullyPaid:fullyPaid.length,partialPaid:partialPaidOrders.length,delivered:delivered.count,inDelivery:inDelivery.count,cancelled:cancelled.count,statusEvents:events.length}));
+  console.log("Report metrics",JSON.stringify({period,orders:orders.length,total,paid,fullyPaid:fullyPaid.length,partialPaid:partialPaidOrders.length,delivered:delivered.count,inDelivery:inDelivery.count,cancelled:cancelled.count,statusEvents:events.length,uniqueStatusOrders:finalStatusEvents.length}));
   return [`📊 <b>Звіт за ${range.label}</b>`,`<code>${range.from}${range.from!==range.to?` — ${range.to}`:""}</code>`,"",`📦 Замовлень: <b>${orders.length}</b>`,`💰 Сума замовлень: <b>${money(total,env.CURRENCY||"UAH")}</b>`,`💳 Оплачено: <b>${money(paid,env.CURRENCY||"UAH")}</b>`,`✅ Повністю оплачені: <b>${fullyPaid.length}</b>`,partialPaidOrders.length?`🟡 Оплати без повного закриття: <b>${partialPaidOrders.length}</b>`:"",`📥 Отримано / виконано: <b>${delivered.count}</b> · ${money(delivered.sum,env.CURRENCY||"UAH")}`,`🚚 В доставці: <b>${inDelivery.count}</b> · ${money(inDelivery.sum,env.CURRENCY||"UAH")}`,`❌ Скасовано / відмови: <b>${cancelled.count}</b> · ${money(cancelled.sum,env.CURRENCY||"UAH")}`,`🧾 Середній чек: <b>${money(average,env.CURRENCY||"UAH")}</b>`,sources?`\n<b>Джерела</b>\n${sources}`:"",managers?`\n<b>Менеджери</b>\n${managers}`:""].filter(Boolean).join("\n");
 }
