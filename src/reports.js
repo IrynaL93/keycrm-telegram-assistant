@@ -1,6 +1,28 @@
 import { getAllOrders, getOrderStatuses, getOrderSources } from "./keycrm.js";
 import { periodDates } from "./periods.js";
 
+const STANDARD_STATUS_LABELS = {
+  new: "Новий",
+  presence_confirmed: "Наявність підтверджено",
+  waiting_for_email_response: "Очікування відповіді",
+  waiting_for_prepayment: "Очікування передоплати",
+  transferred_to_production: "Передано у виробництво",
+  manufacturing: "У виробництві",
+  manufactured: "Виготовлено",
+  delivered_to_delivery: "Передано в доставку",
+  delivered: "Доставлено",
+  departing: "Відправляється",
+  in_transit: "В дорозі",
+  completed: "Виконано",
+  incorrect_data: "Некоректні дані",
+  underbid: "Не вдалося додзвонитися",
+  not_available: "Немає в наявності",
+  bought_elsewhere: "Купили в іншому місці",
+  delivery_did_not_arrange: "Не влаштувала доставка",
+  did_not_arrange_price: "Не влаштувала ціна",
+  canceled: "Скасовано"
+};
+
 const money = (value, currency = "UAH") => {
   const number = Number(value || 0);
   return `${new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 2 }).format(number)} ${currency}`;
@@ -46,6 +68,25 @@ function makeDictionaryMap(items) {
   return map;
 }
 
+function humanizeTechnicalName(value) {
+  if (!value) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (!/^[a-z0-9_-]+$/i.test(text)) return text;
+
+  const spaced = text.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function displayStatusName(rawName) {
+  if (!rawName) return "Без статусу";
+  const key = String(rawName).trim();
+
+  // Translate only known KeyCRM system aliases. Unknown/custom statuses are
+  // never mapped to another status: they keep their own CRM value.
+  return STANDARD_STATUS_LABELS[key] || humanizeTechnicalName(key) || key;
+}
+
 function sourceName(order, sourceMap) {
   const sourceKey = order.source_id ?? order.source_uuid ?? order.source_alias;
   if (sourceKey !== undefined && sourceKey !== null) {
@@ -78,15 +119,15 @@ function statusName(order, statusMap) {
   for (const candidate of candidates) {
     if (candidate === undefined || candidate === null) continue;
     const resolved = statusMap.get(String(candidate));
-    if (resolved) return resolved;
+    if (resolved) return displayStatusName(resolved);
   }
 
-  if (order.status?.name) return order.status.name;
-  if (order.status?.title) return order.status.title;
+  if (order.status?.name) return displayStatusName(order.status.name);
+  if (order.status?.title) return displayStatusName(order.status.title);
 
-  const raw = order.status_id ?? order.status_alias ?? order.status;
+  const raw = order.status_alias ?? (typeof order.status === "string" ? order.status : null) ?? order.status_id;
   if (raw !== undefined && raw !== null && typeof raw !== "object") {
-    return String(raw);
+    return displayStatusName(raw);
   }
   return "Без статусу";
 }
