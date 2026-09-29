@@ -85,8 +85,8 @@ export async function syncOrderState(env) {
 
     if (String(previous.status_id ?? "") !== current.statusId) {
       await env.DB.prepare(`INSERT INTO order_events (order_id, event_type, old_value, new_value, amount, event_at)
-        VALUES (?, 'status_changed', ?, ?, 0, ?)`)
-        .bind(orderId, previous.status_name || String(previous.status_id || ""), current.statusName, now).run();
+        VALUES (?, 'status_changed', ?, ?, ?, ?)`)
+        .bind(orderId, previous.status_name || String(previous.status_id || ""), current.statusName, current.grandTotal, now).run();
       changed += 1;
     }
 
