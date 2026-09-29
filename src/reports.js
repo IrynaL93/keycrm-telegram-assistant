@@ -30,8 +30,17 @@ function becameFullyPaidInRange(o,r){
 
 function normalizedStatus(r){return String(r||"").trim().toLowerCase();}
 function isCancelledStatus(r){return /cancel|canceled|cancelled|скас|відмов|incorrect_data|underbid|not_available|bought_elsewhere|did_not_arrange/i.test(r||"");}
-function isDeliveredStatus(r){const s=normalizedStatus(r);if(s==="delivered_to_delivery"||/передано\s+(в|у)\s+достав/i.test(s))return false;return ["delivered","completed","received","done"].includes(s)||/отримано|отриманий|виконано|виконаний/i.test(s);}
-function isDeliveryStatus(r){const s=normalizedStatus(r);if(isDeliveredStatus(s))return false;return ["delivered_to_delivery","departing","in_transit","shipping"].includes(s)||/передано\s+(в|у)\s+достав|доставц|відправ|дороз/i.test(s);}
+function isDeliveredStatus(r){
+  const s=normalizedStatus(r);
+  // KeyCRM "delivered" / "Доставляється" means the parcel is still in transit.
+  if(["delivered","delivered_to_delivery","departing","in_transit","shipping","delivering"].includes(s)||/передано\s+(в|у)\s+достав|доставля|доставц|відправ|дороз/i.test(s))return false;
+  return ["completed","received","done"].includes(s)||/отримано|отриманий|виконано|виконаний/i.test(s);
+}
+function isDeliveryStatus(r){
+  const s=normalizedStatus(r);
+  if(isDeliveredStatus(s))return false;
+  return ["delivered","delivered_to_delivery","departing","in_transit","shipping","delivering"].includes(s)||/передано\s+(в|у)\s+достав|доставля|доставц|відправ|дороз/i.test(s);
+}
 
 async function statusEventsInRange(env,range){
   if(!env.DB)return [];
