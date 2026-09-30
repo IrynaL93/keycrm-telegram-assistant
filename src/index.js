@@ -1,7 +1,7 @@
 import { buildOrdersReport } from "./reports.js";
 import { syncOrderState } from "./order-state.js";
-import { answerCallback, mainKeyboard, sendMessage, statusSettingsKeyboard, statusGroupKeyboard } from "./telegram.js";
-import { getStatusSettings, loadStatuses, settingsSummary, toggleStatus } from "./settings.js";
+import { answerCallback, mainKeyboard, sendMessage, settingsHomeKeyboard, statusSettingsKeyboard, statusGroupKeyboard, paymentSettingsKeyboard } from "./telegram.js";
+import { getStatusSettings, loadStatuses, settingsSummary, toggleStatus, STATUS_LABELS, getPaymentSettings, togglePaymentSetting, paymentSettingsSummary } from "./settings.js";
 
 function validWebhook(request, env) {
   if (!env.WEBHOOK_SECRET) return true;
@@ -33,10 +33,10 @@ async function setupWebhook(request, env) {
   }
 }
 
-async function buildSyncedReport(env, period) {
+async function buildSyncedReport(env, period, chatId) {
   try { await syncOrderState(env); }
   catch (error) { console.error("Order state sync failed", error); }
-  return buildOrdersReport(env, period);
+  return buildOrdersReport(env, period, chatId);
 }
 
 async function showStatusSettings(env, chatId) {
@@ -46,8 +46,12 @@ async function showStatusSettings(env, chatId) {
 
 async function showStatusGroup(env, chatId, groupKey) {
   const [groups, statuses] = await Promise.all([getStatusSettings(env, chatId), loadStatuses(env)]);
-  const labels = { delivered: "📥 Отримано / виконано", delivery: "🚚 В доставці", cancelled: "❌ Скасовано / відмови" };
-  return sendMessage(env, chatId, `⚙️ <b>${labels[groupKey] || groupKey}</b>\n\nНатисніть на статус, щоб додати або прибрати його з цієї групи.`, statusGroupKeyboard(groupKey, statuses, groups[groupKey] || []));
+  return sendMessage(env, chatId, `⚙️ <b>${STATUS_LABELS[groupKey] || groupKey}</b>\n\nНатисніть на статус, щоб додати або прибрати його з цієї групи.`, statusGroupKeyboard(groupKey, statuses, groups[groupKey] || []));
+}
+
+async function showPaymentSettings(env, chatId) {
+  const settings = await getPaymentSettings(env, chatId);
+  return sendMessage(env, chatId, paymentSettingsSummary(settings), paymentSettingsKeyboard(settings));
 }
 
 async function handleUpdate(update, env) {
@@ -58,7 +62,7 @@ async function handleUpdate(update, env) {
     const text = update.message.text || "";
     if (text === "/start") return sendMessage(env, chatId, `👋 <b>${env.COMPANY_NAME || "KeyCRM"} Telegram Assistant</b>\n\nОберіть звіт:`, mainKeyboard());
     if (text === "/getreport" || text === "/report") {
-      try { return sendMessage(env, chatId, await buildSyncedReport(env, "yesterday"), mainKeyboard()); }
+      try { return sendMessage(env, chatId, await buildSyncedReport(env, "yesterday", chatId), mainKeyboard()); }
       catch (error) { console.error("Report command failed", error); return sendMessage(env, chatId, `⚠️ Помилка формування звіту: ${error.message}`, mainKeyboard()); }
     }
     return sendMessage(env, chatId, "Натисніть /start, щоб відкрити меню.", mainKeyboard());
@@ -71,9 +75,19 @@ async function handleUpdate(update, env) {
     try { await answerCallback(env, callback.id); } catch (error) { console.error("answerCallback failed", error); }
     if (!chatId) return;
 
+    if (data === "settings_home") return sendMessage(env, chatId, "⚙️ <b>Налаштування звітів</b>\n\nОберіть, що потрібно налаштувати:", settingsHomeKeyboard());
     if (data === "settings_statuses") {
       try { return await showStatusSettings(env, chatId); }
       catch (error) { console.error("Settings failed", error); return sendMessage(env, chatId, `⚠️ Помилка налаштувань: ${error.message}`, mainKeyboard()); }
+    }
+    if (data === "settings_payments") {
+      try { return await showPaymentSettings(env, chatId); }
+      catch (error) { console.error("Payment settings failed", error); return sendMessage(env, chatId, `⚠️ Помилка налаштувань оплати: ${error.message}`, mainKeyboard()); }
+    }
+    if (data.startsWith("settings_payment_")) {
+      const key = data.slice("settings_payment_".length);
+      try { await togglePaymentSetting(env, chatId, key); return await showPaymentSettings(env, chatId); }
+      catch (error) { console.error("Payment setting toggle failed", error); return sendMessage(env, chatId, `⚠️ Не вдалося зберегти налаштування оплати: ${error.message}`, mainKeyboard()); }
     }
     if (data === "settings_back") return sendMessage(env, chatId, "Оберіть звіт:", mainKeyboard());
     if (data.startsWith("settings_group_")) {
@@ -99,7 +113,7 @@ async function handleUpdate(update, env) {
       const period = data.slice("orders_".length);
       console.log("Building report", JSON.stringify({ chatId, period }));
       try {
-        const report = await buildSyncedReport(env, period);
+        const report = await buildSyncedReport(env, period, chatId);
         console.log("Report built", JSON.stringify({ period, length: report?.length || 0 }));
         return sendMessage(env, chatId, report, mainKeyboard());
       } catch (error) {
@@ -114,7 +128,7 @@ async function handleUpdate(update, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.5.0", d1: Boolean(env.DB) });
+    if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.6.0", d1: Boolean(env.DB) });
     if (request.method === "GET" && url.pathname === "/setup") return setupWebhook(request, env);
     if (request.method !== "POST" || url.pathname !== "/webhook") return new Response("Not found", { status: 404 });
     if (!validWebhook(request, env)) return new Response("Unauthorized", { status: 401 });
