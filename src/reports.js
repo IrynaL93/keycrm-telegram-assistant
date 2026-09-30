@@ -40,13 +40,15 @@ function orderStatusKeys(o,statusMap){
   }
   return new Set(raw);
 }
-function currentStatusMetric(orders,selectedIds,statusMap){
+function orderMatchesStatuses(o,selectedIds,statusMap){
   const selected=new Set((selectedIds||[]).map(v=>String(v).trim().toLowerCase()));
-  const rows=orders.filter(o=>{
-    const keys=orderStatusKeys(o,statusMap);
-    for(const id of selected)if(keys.has(id))return true;
-    return false;
-  });
+  if(!selected.size)return false;
+  const keys=orderStatusKeys(o,statusMap);
+  for(const id of selected)if(keys.has(id))return true;
+  return false;
+}
+function currentStatusMetric(orders,selectedIds,statusMap){
+  const rows=orders.filter(o=>orderMatchesStatuses(o,selectedIds,statusMap));
   return {count:rows.length,sum:rows.reduce((s,o)=>s+Number(o.grand_total||0),0)};
 }
 
@@ -58,20 +60,22 @@ export async function buildOrdersReport(env,period="yesterday",chatId=null){
     getAllOrders(env,{include:"manager,payments"}),getOrderStatuses(env),getOrderSources(env),settingsPromise,paymentSettingsPromise
   ]);
   const orders=filterOrdersByRange(allOrders,range),sourceMap=makeDictionaryMap(sourcesList),statusMap=makeDictionaryMap(statusesList);
-  const total=orders.reduce((s,o)=>s+Number(o.grand_total||0),0),average=orders.length?total/orders.length:0;
+  const canceledStatusIds=statusSettings.canceled||[];
+  const kpiOrders=orders.filter(o=>!orderMatchesStatuses(o,canceledStatusIds,statusMap));
+  const total=kpiOrders.reduce((s,o)=>s+Number(o.grand_total||0),0),average=kpiOrders.length?total/kpiOrders.length:0;
   const paid=allOrders.reduce((s,o)=>s+paidInRange(o,range),0);
   const fullyPaid=allOrders.filter(o=>becameFullyPaidInRange(o,range));
   const partialPaidOrders=allOrders.filter(o=>paidInRange(o,range)>0&&!becameFullyPaidInRange(o,range));
-  const unpaidOrders=orders.filter(o=>successfulPayments(o).reduce((s,p)=>s+paymentAmount(p),0)<=0.01);
+  const unpaidOrders=kpiOrders.filter(o=>successfulPayments(o).reduce((s,p)=>s+paymentAmount(p),0)<=0.01);
   const statusMetrics=Object.fromEntries(STATUS_GROUPS.map(key=>[key,currentStatusMetric(orders,statusSettings[key],statusMap)]));
   const sourceCounts=new Map(),managerCounts=new Map();
-  for(const o of orders){addCount(sourceCounts,sourceName(o,sourceMap));addCount(managerCounts,managerName(o));}
+  for(const o of kpiOrders){addCount(sourceCounts,sourceName(o,sourceMap));addCount(managerCounts,managerName(o));}
   const sources=formatCounts(sourceCounts),managers=formatCounts(managerCounts),currency=env.CURRENCY||"UAH";
   const statusLines=STATUS_GROUPS.map(key=>`${STATUS_LABELS[key]}: <b>${statusMetrics[key].count}</b> · ${money(statusMetrics[key].sum,currency)}`);
   const paymentLines=[];
   if(paymentSettings.paid)paymentLines.push(`${PAYMENT_LABELS.paid}: <b>${fullyPaid.length}</b>`);
   if(paymentSettings.partial)paymentLines.push(`${PAYMENT_LABELS.partial}: <b>${partialPaidOrders.length}</b>`);
   if(paymentSettings.unpaid)paymentLines.push(`${PAYMENT_LABELS.unpaid}: <b>${unpaidOrders.length}</b>`);
-  console.log("Report metrics",JSON.stringify({period,orders:orders.length,total,paid,statusMetrics,paymentSettings}));
-  return [`📊 <b>Звіт за ${range.label}</b>`,`<code>${range.from}${range.from!==range.to?` — ${range.to}`:""}</code>`,"",`📦 Замовлень: <b>${orders.length}</b>`,`💰 Сума замовлень: <b>${money(total,currency)}</b>`,`💳 Оплачено: <b>${money(paid,currency)}</b>`,...paymentLines,"",...statusLines,`🧾 Середній чек: <b>${money(average,currency)}</b>`,sources?`\n<b>Джерела</b>\n${sources}`:"",managers?`\n<b>Менеджери</b>\n${managers}`:""].filter(v=>v!=="").join("\n");
+  console.log("Report metrics",JSON.stringify({period,orders:orders.length,kpiOrders:kpiOrders.length,total,paid,statusMetrics,paymentSettings}));
+  return [`📊 <b>Звіт за ${range.label}</b>`,`<code>${range.from}${range.from!==range.to?` — ${range.to}`:""}</code>`,"",`📦 Замовлень: <b>${kpiOrders.length}</b>`,`💰 Дохід: <b>${money(total,currency)}</b>`,`💳 Оплачено: <b>${money(paid,currency)}</b>`,...paymentLines,"",...statusLines,`🧾 Середній чек: <b>${money(average,currency)}</b>`,sources?`\n<b>Джерела</b>\n${sources}`:"",managers?`\n<b>Менеджери</b>\n${managers}`:""].filter(v=>v!=="").join("\n");
 }
