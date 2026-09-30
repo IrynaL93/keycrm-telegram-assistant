@@ -33,15 +33,28 @@ export function mainKeyboard() {
       [{ text: "📅 Сьогодні", callback_data: "orders_today" }],
       [{ text: "📅 Цей тиждень", callback_data: "orders_this_week" }],
       [{ text: "📅 Цей місяць", callback_data: "orders_this_month" }],
-      [{ text: "⚙️ Налаштування статусів", callback_data: "settings_statuses" }]
+      [{ text: "⚙️ Налаштування звітів", callback_data: "settings_home" }]
+    ]
+  };
+}
+
+export function settingsHomeKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "📦 Статуси замовлень", callback_data: "settings_statuses" }],
+      [{ text: "💳 Оплата", callback_data: "settings_payments" }],
+      [{ text: "⬅️ До звітів", callback_data: "settings_back" }]
     ]
   };
 }
 
 export function statusSettingsKeyboard(groups) {
   const labels = {
-    delivered: "📥 Отримано / виконано",
+    new: "🆕 Нові",
+    work: "🤝 Погодження / в роботі",
+    production: "🏭 Виробництво",
     delivery: "🚚 В доставці",
+    delivered: "📥 Отримано / виконано",
     cancelled: "❌ Скасовано / відмови"
   };
   return {
@@ -50,7 +63,7 @@ export function statusSettingsKeyboard(groups) {
         text: `${labels[key]} (${groups[key]?.length || 0})`,
         callback_data: `settings_group_${key}`
       }]),
-      [{ text: "⬅️ До звітів", callback_data: "settings_back" }]
+      [{ text: "⬅️ Налаштування", callback_data: "settings_home" }]
     ]
   };
 }
@@ -65,6 +78,23 @@ export function statusGroupKeyboard(groupKey, statuses, selectedIds) {
       callback_data: `settings_toggle_${groupKey}_${id}`
     }];
   });
-  rows.push([{ text: "⬅️ Назад", callback_data: "settings_statuses" }]);
+  rows.push([{ text: "⬅️ Статуси замовлень", callback_data: "settings_statuses" }]);
   return { inline_keyboard: rows };
+}
+
+export function paymentSettingsKeyboard(settings) {
+  const labels = {
+    paid: "Повністю оплачено",
+    partial: "Частково оплачено",
+    unpaid: "Не оплачено"
+  };
+  return {
+    inline_keyboard: [
+      ...Object.keys(labels).map(key => [{
+        text: `${settings[key] ? "✅" : "▫️"} ${labels[key]}`,
+        callback_data: `settings_payment_${key}`
+      }]),
+      [{ text: "⬅️ Налаштування", callback_data: "settings_home" }]
+    ]
+  };
 }
