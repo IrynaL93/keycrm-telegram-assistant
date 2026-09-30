@@ -1,6 +1,7 @@
 import { buildOrdersReport } from "./reports.js";
 import { syncOrderState } from "./order-state.js";
-import { answerCallback, mainKeyboard, sendMessage } from "./telegram.js";
+import { answerCallback, mainKeyboard, sendMessage, statusSettingsKeyboard, statusGroupKeyboard } from "./telegram.js";
+import { getStatusSettings, loadStatuses, settingsSummary, toggleStatus } from "./settings.js";
 
 function validWebhook(request, env) {
   if (!env.WEBHOOK_SECRET) return true;
@@ -38,6 +39,17 @@ async function buildSyncedReport(env, period) {
   return buildOrdersReport(env, period);
 }
 
+async function showStatusSettings(env, chatId) {
+  const [groups, statuses] = await Promise.all([getStatusSettings(env, chatId), loadStatuses(env)]);
+  return sendMessage(env, chatId, settingsSummary(groups, statuses), statusSettingsKeyboard(groups));
+}
+
+async function showStatusGroup(env, chatId, groupKey) {
+  const [groups, statuses] = await Promise.all([getStatusSettings(env, chatId), loadStatuses(env)]);
+  const labels = { delivered: "📥 Отримано / виконано", delivery: "🚚 В доставці", cancelled: "❌ Скасовано / відмови" };
+  return sendMessage(env, chatId, `⚙️ <b>${labels[groupKey] || groupKey}</b>\n\nНатисніть на статус, щоб додати або прибрати його з цієї групи.`, statusGroupKeyboard(groupKey, statuses, groups[groupKey] || []));
+}
+
 async function handleUpdate(update, env) {
   console.log("TG update", JSON.stringify({ update_id: update.update_id, has_message: Boolean(update.message), has_callback_query: Boolean(update.callback_query), callback_data: update.callback_query?.data || null }));
 
@@ -58,6 +70,31 @@ async function handleUpdate(update, env) {
     const data = callback.data || "";
     try { await answerCallback(env, callback.id); } catch (error) { console.error("answerCallback failed", error); }
     if (!chatId) return;
+
+    if (data === "settings_statuses") {
+      try { return await showStatusSettings(env, chatId); }
+      catch (error) { console.error("Settings failed", error); return sendMessage(env, chatId, `⚠️ Помилка налаштувань: ${error.message}`, mainKeyboard()); }
+    }
+    if (data === "settings_back") return sendMessage(env, chatId, "Оберіть звіт:", mainKeyboard());
+    if (data.startsWith("settings_group_")) {
+      const groupKey = data.slice("settings_group_".length);
+      try { return await showStatusGroup(env, chatId, groupKey); }
+      catch (error) { console.error("Settings group failed", error); return sendMessage(env, chatId, `⚠️ Помилка налаштувань: ${error.message}`, mainKeyboard()); }
+    }
+    if (data.startsWith("settings_toggle_")) {
+      const rest = data.slice("settings_toggle_".length);
+      const separator = rest.indexOf("_");
+      const groupKey = separator >= 0 ? rest.slice(0, separator) : "";
+      const statusId = separator >= 0 ? rest.slice(separator + 1) : "";
+      try {
+        await toggleStatus(env, chatId, groupKey, statusId);
+        return await showStatusGroup(env, chatId, groupKey);
+      } catch (error) {
+        console.error("Settings toggle failed", error);
+        return sendMessage(env, chatId, `⚠️ Не вдалося зберегти статус: ${error.message}`, mainKeyboard());
+      }
+    }
+
     if (data.startsWith("orders_")) {
       const period = data.slice("orders_".length);
       console.log("Building report", JSON.stringify({ chatId, period }));
@@ -77,7 +114,7 @@ async function handleUpdate(update, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.4.0", d1: Boolean(env.DB) });
+    if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true, service: "keycrm-telegram-assistant", version: "3.5.0", d1: Boolean(env.DB) });
     if (request.method === "GET" && url.pathname === "/setup") return setupWebhook(request, env);
     if (request.method !== "POST" || url.pathname !== "/webhook") return new Response("Not found", { status: 404 });
     if (!validWebhook(request, env)) return new Response("Unauthorized", { status: 401 });
