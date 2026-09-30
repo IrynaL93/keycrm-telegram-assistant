@@ -29,42 +29,41 @@ function becameFullyPaidInRange(o,r){
   return before<total-0.01 && before+during>=total-0.01;
 }
 
-async function statusEventsInRange(env,range){
-  if(!env.DB)return [];
-  const {from,to}=rangeBounds(range); if(!from||!to)return [];
-  const result=await env.DB.prepare(`SELECT e.order_id,e.old_value,e.new_value,e.event_at,s.grand_total
-    FROM order_events e LEFT JOIN orders_state s ON s.order_id=e.order_id
-    WHERE e.event_type='status_changed' AND e.event_at>=? AND e.event_at<=?
-    ORDER BY e.event_at ASC`).bind(from.toISOString(),to.toISOString()).all();
-  return result.results||[];
+function orderStatusKeys(o,statusMap){
+  const raw=[o.status_id,o.status?.id,o.status,o.status_alias,o.status_code,o.status_key,o.status_slug]
+    .filter(v=>v!==undefined&&v!==null&&typeof v!=="object")
+    .map(v=>String(v).trim().toLowerCase())
+    .filter(Boolean);
+  for(const k of [...raw]){
+    const name=statusMap.get(k);
+    if(name)raw.push(String(name).trim().toLowerCase());
+  }
+  return new Set(raw);
 }
-
-function latestStatusEvents(events){
-  const latest=new Map();
-  for(const e of events)latest.set(Number(e.order_id),e);
-  return [...latest.values()];
-}
-function statusMetric(events,selectedIds){
-  const ids=new Set((selectedIds||[]).map(v=>String(v).trim().toLowerCase()));
-  const rows=events.filter(e=>ids.has(String(e.new_value??"").trim().toLowerCase()));
-  return {count:rows.length,sum:rows.reduce((s,e)=>s+Number(e.grand_total||0),0)};
+function currentStatusMetric(orders,selectedIds,statusMap){
+  const selected=new Set((selectedIds||[]).map(v=>String(v).trim().toLowerCase()));
+  const rows=orders.filter(o=>{
+    const keys=orderStatusKeys(o,statusMap);
+    for(const id of selected)if(keys.has(id))return true;
+    return false;
+  });
+  return {count:rows.length,sum:rows.reduce((s,o)=>s+Number(o.grand_total||0),0)};
 }
 
 export async function buildOrdersReport(env,period="yesterday",chatId=null){
   const range=periodDates(period,env.TIMEZONE||"Europe/Kyiv");
   const settingsPromise=chatId!==null?getStatusSettings(env,chatId):Promise.resolve(Object.fromEntries(STATUS_GROUPS.map(k=>[k,[]])));
   const paymentSettingsPromise=chatId!==null?getPaymentSettings(env,chatId):Promise.resolve({paid:true,partial:true,unpaid:true});
-  const [allOrders,statusesList,sourcesList,events,statusSettings,paymentSettings]=await Promise.all([
-    getAllOrders(env,{include:"manager,payments"}),getOrderStatuses(env),getOrderSources(env),statusEventsInRange(env,range),settingsPromise,paymentSettingsPromise
+  const [allOrders,statusesList,sourcesList,statusSettings,paymentSettings]=await Promise.all([
+    getAllOrders(env,{include:"manager,payments"}),getOrderStatuses(env),getOrderSources(env),settingsPromise,paymentSettingsPromise
   ]);
-  const orders=filterOrdersByRange(allOrders,range),sourceMap=makeDictionaryMap(sourcesList);
+  const orders=filterOrdersByRange(allOrders,range),sourceMap=makeDictionaryMap(sourcesList),statusMap=makeDictionaryMap(statusesList);
   const total=orders.reduce((s,o)=>s+Number(o.grand_total||0),0),average=orders.length?total/orders.length:0;
   const paid=allOrders.reduce((s,o)=>s+paidInRange(o,range),0);
   const fullyPaid=allOrders.filter(o=>becameFullyPaidInRange(o,range));
   const partialPaidOrders=allOrders.filter(o=>paidInRange(o,range)>0&&!becameFullyPaidInRange(o,range));
   const unpaidOrders=orders.filter(o=>successfulPayments(o).reduce((s,p)=>s+paymentAmount(p),0)<=0.01);
-  const finalStatusEvents=latestStatusEvents(events);
-  const statusMetrics=Object.fromEntries(STATUS_GROUPS.map(key=>[key,statusMetric(finalStatusEvents,statusSettings[key])]));
+  const statusMetrics=Object.fromEntries(STATUS_GROUPS.map(key=>[key,currentStatusMetric(orders,statusSettings[key],statusMap)]));
   const sourceCounts=new Map(),managerCounts=new Map();
   for(const o of orders){addCount(sourceCounts,sourceName(o,sourceMap));addCount(managerCounts,managerName(o));}
   const sources=formatCounts(sourceCounts),managers=formatCounts(managerCounts),currency=env.CURRENCY||"UAH";
@@ -73,6 +72,6 @@ export async function buildOrdersReport(env,period="yesterday",chatId=null){
   if(paymentSettings.paid)paymentLines.push(`${PAYMENT_LABELS.paid}: <b>${fullyPaid.length}</b>`);
   if(paymentSettings.partial)paymentLines.push(`${PAYMENT_LABELS.partial}: <b>${partialPaidOrders.length}</b>`);
   if(paymentSettings.unpaid)paymentLines.push(`${PAYMENT_LABELS.unpaid}: <b>${unpaidOrders.length}</b>`);
-  console.log("Report metrics",JSON.stringify({period,orders:orders.length,total,paid,statusMetrics,paymentSettings,statusEvents:events.length,uniqueStatusOrders:finalStatusEvents.length}));
+  console.log("Report metrics",JSON.stringify({period,orders:orders.length,total,paid,statusMetrics,paymentSettings}));
   return [`📊 <b>Звіт за ${range.label}</b>`,`<code>${range.from}${range.from!==range.to?` — ${range.to}`:""}</code>`,"",`📦 Замовлень: <b>${orders.length}</b>`,`💰 Сума замовлень: <b>${money(total,currency)}</b>`,`💳 Оплачено: <b>${money(paid,currency)}</b>`,...paymentLines,"",...statusLines,`🧾 Середній чек: <b>${money(average,currency)}</b>`,sources?`\n<b>Джерела</b>\n${sources}`:"",managers?`\n<b>Менеджери</b>\n${managers}`:""].filter(v=>v!=="").join("\n");
 }
