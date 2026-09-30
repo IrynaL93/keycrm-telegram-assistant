@@ -32,7 +32,39 @@ export function mainKeyboard() {
       [{ text: "📊 Звіт за вчора", callback_data: "orders_yesterday" }],
       [{ text: "📅 Сьогодні", callback_data: "orders_today" }],
       [{ text: "📅 Цей тиждень", callback_data: "orders_this_week" }],
-      [{ text: "📅 Цей місяць", callback_data: "orders_this_month" }]
+      [{ text: "📅 Цей місяць", callback_data: "orders_this_month" }],
+      [{ text: "⚙️ Налаштування статусів", callback_data: "settings_statuses" }]
     ]
   };
+}
+
+export function statusSettingsKeyboard(groups) {
+  const labels = {
+    delivered: "📥 Отримано / виконано",
+    delivery: "🚚 В доставці",
+    cancelled: "❌ Скасовано / відмови"
+  };
+  return {
+    inline_keyboard: [
+      ...Object.keys(labels).map(key => [{
+        text: `${labels[key]} (${groups[key]?.length || 0})`,
+        callback_data: `settings_group_${key}`
+      }]),
+      [{ text: "⬅️ До звітів", callback_data: "settings_back" }]
+    ]
+  };
+}
+
+export function statusGroupKeyboard(groupKey, statuses, selectedIds) {
+  const selected = new Set((selectedIds || []).map(String));
+  const rows = (statuses || []).map(status => {
+    const id = String(status.id ?? status.alias ?? status.code ?? status.key ?? status.slug ?? "");
+    const name = status.name || status.title || status.label || status.display_name || id;
+    return [{
+      text: `${selected.has(id) ? "✅" : "▫️"} ${name}`,
+      callback_data: `settings_toggle_${groupKey}_${id}`
+    }];
+  });
+  rows.push([{ text: "⬅️ Назад", callback_data: "settings_statuses" }]);
+  return { inline_keyboard: rows };
 }
