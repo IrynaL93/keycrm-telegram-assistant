@@ -60,8 +60,8 @@ export async function buildOrdersReport(env,period="yesterday",chatId=null){
     getAllOrders(env,{include:"manager,payments"}),getOrderStatuses(env),getOrderSources(env),settingsPromise,paymentSettingsPromise
   ]);
   const orders=filterOrdersByRange(allOrders,range),sourceMap=makeDictionaryMap(sourcesList),statusMap=makeDictionaryMap(statusesList);
-  const canceledStatusIds=statusSettings.canceled||[];
-  const kpiOrders=orders.filter(o=>!orderMatchesStatuses(o,canceledStatusIds,statusMap));
+  const cancelledStatusIds=statusSettings.cancelled||[];
+  const kpiOrders=orders.filter(o=>!orderMatchesStatuses(o,cancelledStatusIds,statusMap));
   const total=kpiOrders.reduce((s,o)=>s+Number(o.grand_total||0),0),average=kpiOrders.length?total/kpiOrders.length:0;
   const paid=allOrders.reduce((s,o)=>s+paidInRange(o,range),0);
   const fullyPaid=allOrders.filter(o=>becameFullyPaidInRange(o,range));
