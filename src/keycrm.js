@@ -18,14 +18,16 @@ async function requestWithToken(token, endpoint, params = {}) {
 }
 
 export async function validateKeycrmToken(token) {
-  if (!token || String(token).trim().length < 10) return false;
-  try {
-    await requestWithToken(String(token).trim(), "/order", { page: 1, limit: 1 });
-    return true;
-  } catch (error) {
-    console.error("KeyCRM token validation failed", error);
-    return false;
+  const normalizedToken = String(token || "").trim();
+  if (normalizedToken.length < 10) {
+    throw new Error("KeyCRM token is too short");
   }
+
+  // A successful authenticated request proves that the token is valid.
+  // Important: validation errors must propagate to the onboarding handler,
+  // otherwise an invalid token could be saved as an active CRM connection.
+  await requestWithToken(normalizedToken, "/order", { page: 1, limit: 1 });
+  return true;
 }
 
 export async function keycrmGet(env, endpoint, params = {}) { return requestWithToken(getKeycrmToken(env), endpoint, params); }
