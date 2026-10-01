@@ -26,6 +26,15 @@ export async function getClient(env, telegramUserId) {
   return migrateTokenIfNeeded(env, client);
 }
 
+export async function listActiveClients(env) {
+  const result = await requireDb(env)
+    .prepare(`SELECT telegram_user_id, telegram_chat_id, telegram_username, display_name, keycrm_token, currency, timezone, is_active, created_at, updated_at FROM crm_connections WHERE is_active = 1 ORDER BY telegram_user_id`)
+    .all();
+  const clients = [];
+  for (const client of result.results || []) clients.push(await migrateTokenIfNeeded(env, client));
+  return clients;
+}
+
 export async function saveClient(env, client) {
   const now = new Date().toISOString();
   const encryptedToken = await encryptToken(env, client.keycrmToken);
@@ -69,6 +78,8 @@ export async function envForClient(env, client) {
     ...env,
     KEYCRM_TOKEN: token,
     KEYCRM_API_TOKEN: token,
+    CLIENT_USER_ID: Number(client.telegram_user_id),
+    CLIENT_CHAT_ID: Number(client.telegram_chat_id),
     CURRENCY: client.currency || env.CURRENCY || "UAH",
     TIMEZONE: client.timezone || env.TIMEZONE || "Europe/Kyiv"
   };
